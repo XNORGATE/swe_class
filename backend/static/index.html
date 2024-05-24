@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Classroom</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <link href="https://unpkg.com/tailwindcss@^2.0/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div id="app" class="container mx-auto p-4">
+        <h1 class="text-3xl font-bold mb-4">簡易虛擬教室</h1>
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <h2 class="text-2xl font-semibold mb-4">教師入口</h2>
+            <form @submit.prevent="createClassroom" class="mb-6">
+                <div class="mb-4">
+                    <label for="classroomName" class="block text-sm font-medium text-gray-700">教室名稱</label>
+                    <input type="text" id="classroomName" v-model="classroomName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" required>
+                </div>
+                <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded-md">創建教室</button>
+            </form>
+            <div v-if="classroomCode" class="mb-6">
+                <p class="text-lg">Classroom Code: <span class="font-bold">{{ classroomCode }}</span></p>
+            </div>
+            <h2 class="text-2xl font-semibold mb-4">加入教室</h2>
+            <form @submit.prevent="joinClassroom">
+                <div class="mb-4">
+                    <label for="userName" class="block text-sm font-medium text-gray-700">用戶名稱</label>
+                    <input type="text" id="userName" v-model="userName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" required>
+                </div>
+                <div class="mb-4">
+                    <label for="joinCode" class="block text-sm font-medium text-gray-700">教室代碼</label>
+                    <input type="text" id="joinCode" v-model="joinCode" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" required>
+                </div>
+                <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded-md">加入教室</button>
+            </form>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-lg mt-6">
+            <h2 class="text-2xl font-semibold mb-4">目前線上的教室</h2>
+            <ul>
+                <li v-for="classroom in classes" :key="classroom.code" class="mb-2">
+                    教室名稱 : {{ classroom.name }} 代碼: ({{ classroom.code }})
+                    <button @click="deleteClass(classroom.code)" class="bg-red-500 text-white px-2 py-1 rounded-md ml-4">刪除</button>
+                </li>
+            </ul>
+        </div>
+        <div v-if="inClassroom" class="bg-white p-6 rounded-lg shadow-lg mt-6">
+            <h2 class="text-2xl font-semibold mb-4">教室內容</h2>
+            <div class="mb-4">
+                <p class="text-2xl"><span class="font-bold">教室名稱 : {{ joinedClassName }} 代碼: ({{ joinedClassCode }})</span></p>
+            </div>
+            <div class="mb-4">
+                <h3 class="text-xl font-semibold mb-2">檔案分享區</h3>
+                <input type="file" @change="uploadFile" class="mb-4">
+                <ul>
+                    <li v-for="file in files" :key="file.name" class="mb-2">
+                        <a :href="file.url" target="_blank" class="text-blue-500">{{ file.name }}</a>
+                    </li>
+                </ul>
+            </div>
+            <div class="mb-4">
+                <h3 class="text-xl font-semibold mb-2">聊天室</h3>
+                <div class="border border-gray-300 rounded-md p-4 mb-4 h-64 overflow-y-auto">
+                    <div v-for="message in messages" :key="message.id" class="mb-2">
+                        <p><span class="font-bold">{{ message.user }}:</span> {{ message.text }}</p>
+                    </div>
+                </div>
+                <form @submit.prevent="sendMessage">
+                    <input type="text" v-model="newMessage" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 mb-2" placeholder="Type a message" required>
+                    <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded-md">送出</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+        const socket = io('http://localhost:5000');
+
+        const app = new Vue({
+            el: '#app',
+            data: {
+                classroomName: '',
+                classroomCode: '',
+                joinCode: '',
+                userName: '',
+                inClassroom: false,
+                joinedClassName: '',
+                joinedClassCode: '',
+                files: [],
+                messages: [],
+                newMessage: '',
+                classes: [],
+                socketConnected: false
+            },
+            methods: {
+                async createClassroom() {
+                    console.log("Creating classroom...");
+                    try {
+                        const response = await axios.post('http://localhost:5000/create_class', { classroomName: this.classroomName });
+                        console.log(response.data);
+                        this.classroomCode = response.data.classroomCode;
+                        this.fetchClasses();
+                    } catch (error) {
+                        console.error('Error creating classroom:', error);
+                    }
+                },
+                async joinClassroom() {
+                    console.log("Joining classroom...");
+                    try {
+                        const response = await axios.post('http://localhost:5000/join_class', { joinCode: this.joinCode, userName: this.userName });
+                        console.log(response.data);
+                        if (response.data.success) {
+                            this.inClassroom = true;
+                            this.joinedClassName = this.classes.find(classroom => classroom.code === this.joinCode).name;
+                            this.joinedClassCode = this.joinCode;
+                            if (!this.socketConnected) {
+                                socket.on('receive_message', (message) => {
+                                    // Check if the message already exists to avoid duplicates
+                                    if (!this.messages.some(m => m.id === message.id)) {
+                                        this.messages.push(message);
+                                    }
+                                });
+                                this.socketConnected = true;
+                            }
+                        } else {
+                            alert('Invalid classroom code');
+                        }
+                    } catch (error) {
+                        console.error('Error joining classroom:', error);
+                    }
+                },
+                async deleteClass(classCode) {
+                    console.log("Deleting class...");
+                    try {
+                        const response = await axios.post('http://localhost:5000/delete_class', { classCode: classCode });
+                        console.log(response.data);
+                        this.fetchClasses();
+                    } catch (error) {
+                        console.error('Error deleting class:', error);
+                    }
+                },
+                async uploadFile(event) {
+                    console.log("Uploading file...");
+                    const file = event.target.files[0];
+                    if (file) {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        try {
+                            const response = await axios.post('http://localhost:5000/upload', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                }
+                            });
+                            console.log(response.data);
+                            this.files.push({ name: response.data.name, url: response.data.url });
+                        } catch (error) {
+                            console.error('Error uploading file:', error);
+                        }
+                    }
+                },
+                sendMessage() {
+                    console.log("Sending message...");
+                    if (this.newMessage.trim()) {
+                        const message = { user: this.userName, text: this.newMessage, id: uuidv4() };
+                        this.messages.push(message);
+                        this.newMessage = '';
+                        socket.emit('send_message', message);
+                    }
+                },
+                async fetchClasses() {
+                    console.log("Fetching classes...");
+                    try {
+                        const response = await axios.get('http://localhost:5000/get_classes');
+                        this.classes = response.data;
+                    } catch (error) {
+                        console.error('Error fetching classes:', error);
+                    }
+                }
+            },
+            mounted() {
+                this.fetchClasses();
+            }
+        });
+
+        // UUID generation function
+        function uuidv4() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+    </script>
+</body>
+</html>
